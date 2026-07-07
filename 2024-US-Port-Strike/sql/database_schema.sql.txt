@@ -1,0 +1,214 @@
+
+   Project: 2024 US East Coast Port Strike Risk Engine
+   Author: Daniel Tunis
+   Description: Database-First architecture designed to ingest US Coast Guard
+                spatial telemetry, geofence port anchorages, and calculate
+                contractual opex and demurrage liabilities.
+   ----------------------------------------------------------------------------- */
+
+-- Clean up existing schemas and dependent views first to prevent locked table errors
+DROP VIEW IF EXISTS view_us_port_strike_metrics CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS mv_us_port_strike_metrics CASCADE;
+DROP TABLE IF EXISTS us_ais_pings_2024 CASCADE;
+DROP TABLE IF EXISTS us_anchorage_zones CASCADE;
+DROP TABLE IF EXISTS us_vessel_metadata CASCADE;
+
+-- Enable spatial engine
+CREATE EXTENSION IF NOT EXISTS postgis;
+
+-- -----------------------------------------------------------------------------
+-- 1. Core Parent Table (Spatially Indexed & Partitioned)
+-- -----------------------------------------------------------------------------
+CREATE TABLE us_ais_pings_2024 (
+    id BIGSERIAL,
+    mmsi INT NOT NULL,
+    ping_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+    latitude NUMERIC(9,6) NOT NULL,
+    longitude NUMERIC(9,6) NOT NULL,
+    sog NUMERIC(4,1) NOT NULL,
+    geom GEOMETRY(Point, 4326),
+    PRIMARY KEY (id, ping_timestamp)
+) PARTITION BY RANGE (ping_timestamp);
+
+-- GIST index is critical for handling high-volume spatial contains queries later
+CREATE INDEX idx_us_ais_pings_geom ON us_ais_pings_2024 USING GIST(geom);
+
+
+-- -----------------------------------------------------------------------------
+-- 2. Range Partitions (Temporal Event-Windows)
+-- We add a 1-day safety buffer on boundaries to handle local system timezone shifts.
+-- -----------------------------------------------------------------------------
+
+-- Milestone 1: Pre-Strike Baseline (Covers Sept 15)
+CREATE TABLE pings_us_baseline PARTITION OF us_ais_pings_2024
+    FOR VALUES FROM ('2024-09-14 00:00:00+00') TO ('2024-09-16 00:00:00+00');
+
+-- Milestone 2: Pre-Strike Tension Squeeze (Covers Sept 30)
+CREATE TABLE pings_us_tension PARTITION OF us_ais_pings_2024
+    FOR VALUES FROM ('2024-09-29 00:00:00+00') TO ('2024-10-01 00:00:00+00');
+
+-- Milestone 3: Active Strike Peak (Covers Oct 01, Oct 02, and Oct 03)
+CREATE TABLE pings_us_strike PARTITION OF us_ais_pings_2024
+    FOR VALUES FROM ('2024-10-01 00:00:00+00') TO ('2024-10-04 00:00:00+00');
+
+-- Milestone 4: Post-Strike Clearance (Covers Oct 04 and Oct 15)
+CREATE TABLE pings_us_recovery PARTITION OF us_ais_pings_2024
+    FOR VALUES FROM ('2024-10-04 00:00:00+00') TO ('2024-10-16 00:00:00+00');
+
+
+-- -----------------------------------------------------------------------------
+-- 3. Spatial Geofences (Tybee Roads Outer Anchorage, Savannah, GA)
+-- -----------------------------------------------------------------------------
+CREATE TABLE us_anchorage_zones (
+    id SERIAL PRIMARY KEY,
+    port_name VARCHAR(100) NOT NULL,
+    zone_name VARCHAR(100) NOT NULL,
+    geom GEOMETRY(Polygon, 4326) NOT NULL
+);
+
+CREATE INDEX idx_us_anchorage_zones_geom ON us_anchorage_zones USING GIST(geom);
+
+-- Load the physical outer boundaries of the Tybee anchorage coordinates
+INSERT INTO us_anchorage_zones (port_name, zone_name, geom)
+VALUES (
+    'Savannah', 
+    'Tybee Roads Outer Anchorage',
+    ST_GeomFromText('POLYGON((-80.85 31.90, -80.65 31.90, -80.65 32.05, -80.85 32.05, -80.85 31.90))', 4326)
+);
+
+
+-- -----------------------------------------------------------------------------
+-- 4. Vessel Metadata (Physical Specifications & Aux Fuel Baselines)
+-- -----------------------------------------------------------------------------
+CREATE TABLE us_vessel_metadata (
+    mmsi INT PRIMARY KEY,
+    vessel_name VARCHAR(100) NOT NULL,
+    vessel_type VARCHAR(50) NOT NULL,
+    capacity_teu INT,
+    daily_aux_fuel_anchored NUMERIC(5, 2) NOT NULL
+);
+
+/* 
+   NOTE FOR EXECUTOR:
+   Run the following INSERT query only after completing the Python ETL ingestion.
+   It scans all loaded pings, aggregates unique MMSIs, and generates matching 
+   metadata to guarantee 100% referential integrity during table joins.
+*/
+/*
+INSERT INTO us_vessel_metadata (mmsi, vessel_name, vessel_type, capacity_teu, daily_aux_fuel_anchored)
+SELECT 
+    mmsi,
+    CASE 
+        WHEN mmsi % 2 = 0 THEN 'US_FLAG_MSC_' || UPPER(SUBSTRING(MD5(mmsi::text) FROM 1 FOR 6))
+        ELSE 'US_FLAG_MAERSK_' || UPPER(SUBSTRING(MD5(mmsi::text) FROM 1 FOR 6))
+    END AS vessel_name,
+    CASE 
+        WHEN mmsi % 3 = 0 THEN 'Crude Oil Tanker'
+        ELSE 'Container Ship'
+    END AS vessel_type,
+    CASE 
+        WHEN mmsi % 3 = 0 THEN NULL 
+        ELSE (2000 + (mmsi % 22000))::INT
+    END AS capacity_teu,
+    CASE 
+        WHEN mmsi % 3 = 0 THEN ROUND((1.5 + (mmsi % 3)::numeric), 2) 
+        ELSE ROUND((2.0 + (mmsi % 3)::numeric), 2) 
+    END AS daily_aux_fuel_anchored
+FROM (
+    SELECT DISTINCT mmsi FROM us_ais_pings_2024
+) unique_ships
+ON CONFLICT (mmsi) DO NOTHING;
+*/
+
+
+-- -----------------------------------------------------------------------------
+-- 5. Analytical Engine (Materialized View & Power BI Wrapper)
+-- -----------------------------------------------------------------------------
+/*
+   NOTE FOR EXECUTOR:
+   Run this compilation block after populating your metadata.
+*/
+/*
+-- Allocate 1 GB of RAM to speed up the local database compilation
+SET work_mem = '1GB';
+
+CREATE MATERIALIZED VIEW mv_us_port_strike_metrics AS
+WITH static_phases AS (
+    -- Master-list template. Guarantees that all 4 milestones render on the 
+    -- dashboard even if a phase has exactly zero physical waiting hours.
+    SELECT '1. Normal Baseline' AS milestone_phase
+    UNION ALL
+    SELECT '2. Tension Squeeze'
+    UNION ALL
+    SELECT '3. Strike Peak'
+    UNION ALL
+    SELECT '4. Recovery & Clearance'
+),
+raw_anchored_intervals AS (
+    SELECT 
+        v.vessel_name,
+        v.vessel_type,
+        v.capacity_teu,
+        v.daily_aux_fuel_anchored,
+        p.ping_timestamp,
+        CASE 
+            WHEN p.ping_timestamp BETWEEN '2024-09-14 00:00:00+00' AND '2024-09-16 23:59:59+00' THEN '1. Normal Baseline'
+            WHEN p.ping_timestamp BETWEEN '2024-09-29 00:00:00+00' AND '2024-10-01 00:00:00+00' THEN '2. Tension Squeeze'
+            WHEN p.ping_timestamp BETWEEN '2024-10-01 00:00:00+00' AND '2024-10-04 00:00:00+00' THEN '3. Strike Peak'
+            ELSE '4. Recovery & Clearance'
+        END AS milestone_phase,
+        -- Calculate time difference between consecutive pings chronologically per vessel.
+        -- We cap the gap at 4 hours to avoid massive spikes if a ship temporarily leaves the geofence.
+        CASE 
+            WHEN (EXTRACT(EPOCH FROM (p.ping_timestamp - LAG(p.ping_timestamp) OVER (PARTITION BY p.mmsi ORDER BY p.ping_timestamp))) / 3600.0) < 4.0 
+            THEN (EXTRACT(EPOCH FROM (p.ping_timestamp - LAG(p.ping_timestamp) OVER (PARTITION BY p.mmsi ORDER BY p.ping_timestamp))) / 3600.0)
+            ELSE 0
+        END AS hours_elapsed
+    FROM us_ais_pings_2024 p
+    JOIN us_vessel_metadata v ON p.mmsi = v.mmsi
+    JOIN us_anchorage_zones z ON ST_Contains(z.geom, p.geom)
+    WHERE z.zone_name = 'Tybee Roads Outer Anchorage'
+      AND p.sog < 1.0 -- Filter strictly for anchored/stationary state
+),
+calculated_metrics AS (
+    SELECT 
+        milestone_phase,
+        vessel_name,
+        vessel_type,
+        capacity_teu,
+        ROUND(SUM(hours_elapsed)::NUMERIC, 2) AS total_anchored_hours,
+        ROUND((SUM(hours_elapsed) / 24.0)::NUMERIC, 2) AS total_anchored_days,
+        ROUND((SUM(hours_elapsed) / 24.0 * daily_aux_fuel_anchored)::NUMERIC, 2) AS wasted_fuel_tons,
+        ROUND((SUM(hours_elapsed) / 24.0 * daily_aux_fuel_anchored * 740.00)::NUMERIC, 2) AS wasted_fuel_cost_usd,
+        -- Port Demurrage Surcharge Model:
+        -- Charges apply past a 24-hour free laytime window. We assume an average container 
+        -- block size of 1 container per 40 TEUs, fined at $250.00 per day.
+        CASE 
+            WHEN (SUM(hours_elapsed) / 24.0) > 1.0 
+            THEN ROUND((((SUM(hours_elapsed) / 24.0) - 1.0) * (COALESCE(capacity_teu, 1000) / 40.0) * 250.00)::NUMERIC, 2)
+            ELSE 0.00
+        END AS demurrage_fine_usd
+    FROM raw_anchored_intervals
+    GROUP BY milestone_phase, vessel_name, vessel_type, capacity_teu, daily_aux_fuel_anchored
+)
+-- LEFT JOIN ensures '1. Normal Baseline' is physically present in the output with 0.00 values
+SELECT 
+    s.milestone_phase,
+    COALESCE(c.vessel_name, 'No Delayed Vessels') AS vessel_name,
+    COALESCE(c.vessel_type, 'N/A') AS vessel_type,
+    c.capacity_teu,
+    COALESCE(c.total_anchored_hours, 0.00) AS total_anchored_hours,
+    COALESCE(c.total_anchored_days, 0.00) AS total_anchored_days,
+    COALESCE(c.wasted_fuel_tons, 0.00) AS wasted_fuel_tons,
+    COALESCE(c.wasted_fuel_cost_usd, 0.00) AS wasted_fuel_cost_usd,
+    COALESCE(c.demurrage_fine_usd, 0.00) AS demurrage_fine_usd
+FROM static_phases s
+LEFT JOIN calculated_metrics c ON s.milestone_phase = c.milestone_phase;
+
+-- Create standard view wrapper (Power BI cannot natively read Materialized Views)
+CREATE OR REPLACE VIEW view_us_port_strike_metrics AS 
+SELECT 
+    *,
+    (wasted_fuel_cost_usd + demurrage_fine_usd) AS total_financial_loss_usd
+FROM mv_us_port_strike_metrics;
+*/

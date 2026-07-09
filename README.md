@@ -6,12 +6,12 @@ These projects demonstrate the capability to ingest high-volume telemetry data (
 
 ---
 
-## 📂 Project Directory & Interactive Dashboards
+## 📂 Project Directory & Interactive Reports
 
-| Project Title | Primary Geofence | Technical Stack | Business / Finance Focus | Interactive Dashboard |
+| Project Title | Primary Geofence | Technical Stack | Business / Finance Focus | Project Deliverables |
 | :--- | :---: | :--- | :--- | :---: |
-| **1. The 2026 Baltic Shipping Shock** | Skagen Straits (Denmark) | Python, PostGIS, Power BI | Geopolitical War, Fuel Waste, EU ETS Carbon Taxes | [Interactive Report](https://www.novypro.com/) |
-| **2. The 2024 US East Coast Port Strike** | Port of Savannah (USA) | Python (Zstd), PostGIS, Power BI | Labor Disputes, Port Dwell, US Demurrage Surcharges | [Interactive Report](https://www.novypro.com/) |
+| **1. The 2026 Baltic Shipping Shock** | Skagen Straits (Denmark) | Python, PostGIS, Power BI | Geopolitical War, Fuel Waste, EU ETS Carbon Taxes | [Database & Visual Report](./2026-Baltic-Shipping-Shock/) |
+| **2. The 2024 US East Coast Port Strike** | Port of Savannah (USA) | Python (Zstd), PostGIS, Power BI | Labor Disputes, Port Dwell, US Demurrage Surcharges | [Database & Visual Report](./2024-US-Port-Strike/) |
 
 ---
 
@@ -37,10 +37,16 @@ Instead of executing heavy geospatial containment checks (`ST_Contains`) and tim
 *   **The Spatial Logic:** PostGIS was used to geofence the Skagen Anchorage (Danish Straits), tracking vessel waiting times (SOG < 1.0 knot) as they hovered waiting for updated insurance and transit clearances.
 *   **The Financial Logic:** Waiting hours were converted to wasted Marine Gas Oil (MGO) tons based on auxiliary engine fuel-burn curves. The model then applied the standard IMO Carbon Conversion Factor (3.206) to calculate exact EU ETS carbon tax exposures (€85/ton of CO2) incurred by the fleet.
 
+![Baltic Shipping Shock Executive Dashboard](2026-Baltic-Shipping-Shock/baltic_cfo_view.png)
+
+---
+
 ### Project 2: The 2024 US East Coast Port Strike (USA)
 *   **The Disruption:** A major 3-day labor strike shut down all East and Gulf Coast port terminals, freezing supply chain velocity.
 *   **The Spatial Logic:** PostGIS was used to geofence the Tybee Roads Outer Anchorage, tracking container ship dwell times outside the Port of Savannah, Georgia.
 *   **The Financial Logic:** Under standard Charter Party agreements, after a 24-hour free laytime window, cargo owners are penalized for delays. This model applied a standard port demurrage rate of $250.00 per day per container based on the vessel's TEU capacity to calculate the exact cash liability shift between the charterer and the shipowner.
+
+![Port of Savannah Demurrage Dashboard](2024-US-Port-Strike/us_strike_view.png.png)
 
 ---
 

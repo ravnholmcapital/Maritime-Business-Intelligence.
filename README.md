@@ -46,7 +46,7 @@ Instead of executing heavy geospatial containment checks (`ST_Contains`) and tim
 *   **The Spatial Logic:** PostGIS was used to geofence the Tybee Roads Outer Anchorage, tracking container ship dwell times outside the Port of Savannah, Georgia.
 *   **The Financial Logic:** Under standard Charter Party agreements, after a 24-hour free laytime window, cargo owners are penalized for delays. This model applied a standard port demurrage rate of $250.00 per day per container based on the vessel's TEU capacity to calculate the exact cash liability shift between the charterer and the shipowner.
 
-![Port of Savannah Demurrage Dashboard](2024-US-Port-Strike/us_strike_view.png.png)
+![Port of Savannah Demurrage Dashboard](2024-US-Port-Strike/us_strike_view.png)
 
 ---
 

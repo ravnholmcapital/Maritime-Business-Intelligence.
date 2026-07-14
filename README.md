@@ -2,16 +2,15 @@
 
 A professional, dual-project portfolio applying data engineering, spatial database architecture, and financial opex modeling to analyze global maritime supply chain disruptions. 
 
-These projects demonstrate the capability to ingest high-volume telemetry data (130M+ rows), geofence maritime corridors using PostGIS, and translate physical vessel waiting times into direct corporate financial liabilities.
-
+These projects demonstrate the capability to ingest high-volume telemetry data (130M+ rows), geofence maritime corridors using PostGIS, and translate physical vessel waiting times into direct corporate financial liabilities.Both projects were built in 2026. The US Port Strike Risk Engine uses historical AIS data to model the real 2024 Port of Savannah labor disruption; the Baltic Shipping Shock model analyzes 2026 EU ETS carbon exposure and vessel delay patterns.
 ---
 
 ## 📂 Project Directory & Interactive Reports
 
 | Project Title | Primary Geofence | Technical Stack | Business / Finance Focus | Project Deliverables |
 | :--- | :---: | :--- | :--- | :---: |
-| **1. The 2026 Baltic Shipping Shock** | Skagen Straits (Denmark) | Python, PostGIS, Power BI | Geopolitical War, Fuel Waste, EU ETS Carbon Taxes | [Database & Visual Report](./2026-Baltic-Shipping-Shock/) |
-| **2. The 2024 US East Coast Port Strike** | Port of Savannah (USA) | Python (Zstd), PostGIS, Power BI | Labor Disputes, Port Dwell, US Demurrage Surcharges | [Database & Visual Report](./2024-US-Port-Strike/) |
+| **1. The 2026 Baltic Shipping Shock** | Skagen Straits (Denmark) | Python, PostGIS, Power BI | Geopolitical War, Fuel Waste, EU ETS Carbon Taxes | [Database & Visual Report](./Baltic-Shipping-Surcharge-Model/) |
+| **2. The 2024 US East Coast Port Strike** | Port of Savannah (USA) | Python (Zstd), PostGIS, Power BI | Labor Disputes, Port Dwell, US Demurrage Surcharges | [Database & Visual Report](./US-Port-Strike-Risk-Engine/) |
 
 ---
 
